@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+from datetime import date
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import UnitOfTemperature, UnitOfTime, EntityCategory
 from homeassistant.core import HomeAssistant, callback
@@ -13,7 +14,7 @@ from .coordinator import ThesslaGreenCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Mapowania dla sensorow z wartosciami enum (wg dokumentacji Thessla)
+# Mapowania dla sensorow z wartosciami enum (wg dokumentacji Thessla AirPack4)
 GWC_STATUS_MAP = {
     0: "GWC nieaktywny",
     1: "Tryb zima",
@@ -32,10 +33,14 @@ BYPASS_STATUS_MAP = {
     2: "Funkcja chlodzenia (freecooling)",
 }
 
+POSTHEATER_STATUS_MAP = {
+    0: "Nieaktywna",
+    1: "Aktywna",
+}
+
 # Sensory standardowe (numeryczne).
-# Adres 22 (Temperatura otoczenia / TO) celowo nie ma duplikatu - usunieto stary
-# "Rekuperator Temperatura PCB" (byl mylnie nazwany - rejestr 22 to TO wg dokumentacji,
-# nie temperatura PCB).
+# v0.4.1: zmieniono nazwe "Temperatura PCB" -> "Temperatura otoczenia"
+# (rejestr 22 wg dokumentacji to ambient_temperature TO, nie temperatura PCB).
 SENSORS = [
     # Temperatury (input registers, scale 0.1)
     {"name": "Rekuperator Temperatura Czerpnia", "address": 16, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
@@ -43,7 +48,7 @@ SENSORS = [
     {"name": "Rekuperator Temperatura Wywiew", "address": 18, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
     {"name": "Rekuperator Temperatura za FPX", "address": 19, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
     {"name": "Rekuperator Temperatura kanal nawiew", "address": 20, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
-    {"name": "Rekuperator Temperatura PCB", "address": 22, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:home-thermometer"},
+    {"name": "Rekuperator Temperatura otoczenia", "address": 22, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:home-thermometer"},
 
     # Przeplywy (holding registers)
     {"name": "Rekuperator Strumien nawiew", "address": 256, "input_type": "holding", "scale": 1, "precision": 1, "unit": "m3/h", "icon": "mdi:fan"},
@@ -58,6 +63,10 @@ SENSORS = [
     {"name": "Rekuperator speedmanual", "address": 4210, "input_type": "holding", "unit": "%", "icon": "mdi:speedometer"},
     {"name": "Rekuperator Predkosc chwilowy", "address": 4211, "input_type": "holding", "unit": "%", "icon": "mdi:speedometer-medium"},
     {"name": "Rekuperator Kod alarmu", "address": 4384, "input_type": "holding", "icon": "mdi:alert-circle"},
+
+    # NOWE v0.4.1: zuzycie filtrow (% - tylko AirPack4, rejestry 0-127)
+    {"name": "Rekuperator Filtr nawiewny zuzycie", "address": 4482, "input_type": "holding", "scale": 1, "precision": 0, "unit": "%", "icon": "mdi:air-filter"},
+    {"name": "Rekuperator Filtr wywiewny zuzycie", "address": 4483, "input_type": "holding", "scale": 1, "precision": 0, "unit": "%", "icon": "mdi:air-filter"},
 ]
 
 # Sensory z mapowaniem wartosci na opisowy tekst
@@ -65,6 +74,15 @@ ENUM_SENSORS = [
     {"name": "Rekuperator GWC status", "address": 4263, "value_map": GWC_STATUS_MAP, "icon": "mdi:earth"},
     {"name": "Rekuperator KOMFORT status", "address": 4305, "value_map": KOMFORT_STATUS_MAP, "icon": "mdi:thermostat"},
     {"name": "Rekuperator Bypass status", "address": 4330, "value_map": BYPASS_STATUS_MAP, "icon": "mdi:debug-step-over"},
+    # NOWE v0.4.1: status nagrzewnicy wtornej (postHeater)
+    {"name": "Rekuperator postHeater status", "address": 4704, "value_map": POSTHEATER_STATUS_MAP, "icon": "mdi:radiator"},
+]
+
+# Sensory dat wymiany filtrow (rejestry 4660, 4662)
+# Wartosc to zapakowana data: dzien (b0-b4), miesiac (b5-b8), rok (b9-b15) gdzie rok = 2000+rok
+FILTER_DATE_SENSORS = [
+    {"name": "Rekuperator Filtr nawiewny data wymiany", "address": 4660, "icon": "mdi:calendar-clock"},
+    {"name": "Rekuperator Filtr wywiewny data wymiany", "address": 4662, "icon": "mdi:calendar-clock"},
 ]
 
 
@@ -85,6 +103,11 @@ async def async_setup_entry(
     entities.extend([
         ModbusEnumSensor(coordinator=coordinator, slave=slave, **sensor)
         for sensor in ENUM_SENSORS
+    ])
+
+    entities.extend([
+        ModbusFilterDateSensor(coordinator=coordinator, slave=slave, **sensor)
+        for sensor in FILTER_DATE_SENSORS
     ])
 
     # Sensor diagnostyczny
@@ -191,6 +214,73 @@ class ModbusEnumSensor(SensorEntity):
         if raw is None:
             return None
         return self._value_map.get(raw, f"Nieznany ({raw})")
+
+    async def async_update(self):
+        pass
+
+    async def async_added_to_hass(self):
+        self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
+
+
+class ModbusFilterDateSensor(SensorEntity):
+    """Sensor dekodujacy spakowana date wymiany filtra z 16-bitowego rejestru.
+
+    Format wg dokumentacji AirPack4:
+      bity b0-b4   = dzien (5 bitow, 0-31)
+      bity b5-b8   = miesiac (4 bity, 1-12)
+      bity b9-b15  = rok (7 bitow, offset od 2000)
+
+    Przyklad: 0x2d62 = 0010110 1011 00010
+      rok = 2000 + 22 = 2022
+      miesiac = 11
+      dzien = 2
+      -> 2022-11-02
+    """
+
+    _attr_device_class = "date"
+
+    def __init__(self, coordinator: ThesslaGreenCoordinator, name, address, icon=None, slave=1):
+        self.coordinator = coordinator
+        self._address = address
+        self._slave = slave
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_unique_id = f"thessla_filterdate_{slave}_{address}"
+
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{slave}")},
+            "name": "Rekuperator Thessla",
+            "manufacturer": "Thessla Green",
+            "model": "Modbus Rekuperator",
+        }
+
+    @property
+    def available(self):
+        return self.coordinator.last_update_success and self.native_value is not None
+
+    @property
+    def native_value(self):
+        raw = self.coordinator.safe_data.holding.get(self._address)
+        if raw is None or raw == 0:
+            return None
+
+        try:
+            day = raw & 0x1F             # bity b0-b4
+            month = (raw >> 5) & 0x0F    # bity b5-b8
+            year = 2000 + ((raw >> 9) & 0x7F)  # bity b9-b15
+
+            # Walidacja
+            if not (1 <= day <= 31) or not (1 <= month <= 12) or not (2000 <= year <= 2099):
+                _LOGGER.debug(
+                    "Niepoprawna data filtra w rejestrze %d: raw=0x%04x -> %d-%02d-%02d",
+                    self._address, raw, year, month, day
+                )
+                return None
+
+            return date(year, month, day)
+        except (ValueError, TypeError) as e:
+            _LOGGER.debug("Blad dekodowania daty filtra (rejestr %d, raw=%s): %s", self._address, raw, e)
+            return None
 
     async def async_update(self):
         pass

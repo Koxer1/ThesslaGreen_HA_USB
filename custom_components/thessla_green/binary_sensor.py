@@ -11,25 +11,43 @@ from .coordinator import ThesslaGreenCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Alarmy filtrow w AirPack4 - rejestry 8332-8351 (E140-E157)
+# Wszystkie z device_class="problem" (czerwone w UI gdy on)
 BINARY_SENSORS = [
     # Odczyt z COILS
     {"name": "Rekuperator Silownik bypassu", "address": 9, "input_type": "coil", "icon_on": "mdi:valve-open", "icon_off": "mdi:valve-closed"},
     {"name": "Rekuperator Potwierdzenie pracy", "address": 11, "input_type": "coil", "icon_on": "mdi:check-circle", "icon_off": "mdi:circle-outline"},
 
-    # Odczyt z HOLDING REGISTERS
+    # Odczyt z HOLDING REGISTERS - alarmy ogolne
     {"name": "Rekuperator Alarm", "address": 8192, "input_type": "holding", "device_class": "problem"},
-    {"name": "Rekuperator Awaria CF Nawiewu", "address": 8330, "input_type": "holding", "device_class": "problem"},
-    {"name": "Rekuperator Awaria CF Wywiewu", "address": 8331, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Error", "address": 8193, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator FPX zabezpieczenie termiczne", "address": 8208, "input_type": "holding", "device_class": "safety"},
     {"name": "Rekuperator Awaria Wentylatora Nawiewu", "address": 8222, "input_type": "holding", "device_class": "problem"},
     {"name": "Rekuperator Awaria Wentylatora Wywiewu", "address": 8223, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Awaria CF Nawiewu", "address": 8330, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Awaria CF Wywiewu", "address": 8331, "input_type": "holding", "device_class": "problem"},
+
+    # NOWE v0.4.1: alarmy filtrow (AirPack4)
+    {"name": "Rekuperator Awaria CF filtra nawiewnego", "address": 8332, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Awaria CF filtra wywiewnego", "address": 8333, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Brak filtra nawiewnego", "address": 8334, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Brak filtra wywiewnego", "address": 8335, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Blad przeplywu nawiew", "address": 8336, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Blad przeplywu wywiew", "address": 8337, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Wymiana filtra nawiewnego", "address": 8338, "input_type": "holding", "icon_on": "mdi:air-filter", "icon_off": "mdi:fan"},
+    {"name": "Rekuperator Wymiana filtra wywiewnego", "address": 8339, "input_type": "holding", "icon_on": "mdi:air-filter", "icon_off": "mdi:fan"},
+    {"name": "Rekuperator Zuzycie filtra nawiewnego krytyczne", "address": 8340, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Zuzycie filtra wywiewnego krytyczne", "address": 8341, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Wymiana filtra nawiewnego (E150)", "address": 8342, "input_type": "holding", "icon_on": "mdi:air-filter", "icon_off": "mdi:fan"},
+    {"name": "Rekuperator Wymiana filtra wywiewnego (E151)", "address": 8343, "input_type": "holding", "icon_on": "mdi:air-filter", "icon_off": "mdi:fan"},
+    {"name": "Rekuperator Czas filtra nawiewnego przekroczony", "address": 8348, "input_type": "holding", "device_class": "problem"},
+    {"name": "Rekuperator Czas filtra wywiewnego przekroczony", "address": 8349, "input_type": "holding", "device_class": "problem"},
 
     # BYPASS: tutaj wartość 0 oznacza "ON" (otwarty) – odwracamy logikę przez on_value=0
     {"name": "Rekuperator Bypass", "address": 4320, "input_type": "holding", "on_value": 0, "icon_on": "mdi:valve-open", "icon_off": "mdi:valve-closed"},
 
-    {"name": "Rekuperator Error", "address": 8193, "input_type": "holding", "device_class": "problem"},
     {"name": "Rekuperator fpx flaga", "address": 4192, "input_type": "holding", "icon_on": "mdi:flag", "icon_off": "mdi:flag-outline"},
     {"name": "Rekuperator FPX tryb", "address": 4198, "input_type": "holding", "icon_on": "mdi:fan-alert", "icon_off": "mdi:fan"},
-    {"name": "Rekuperator FPX zabezpieczenie termiczne", "address": 8208, "input_type": "holding", "device_class": "safety"},
     {"name": "Rekuperator lato zima", "address": 4209, "input_type": "holding", "icon_on": "mdi:sun-thermometer", "icon_off": "mdi:snowflake"},
     {"name": "Rekuperator Wymiana Filtrów", "address": 8444, "input_type": "holding", "icon_on": "mdi:air-filter", "icon_off": "mdi:fan-alert"},
     {"name": "Rekuperator Status ERV", "address": 4704, "input_type": "holding", "on_value": 0, "icon_on": "mdi:radiator", "icon_off": "mdi:radiator-off"},

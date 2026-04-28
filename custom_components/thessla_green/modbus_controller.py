@@ -23,7 +23,10 @@ class ControllerException(Exception):
 
 
 class ThesslaGreenModbusController:
-    """Modbus RTU controller for Thessla Green AirPack via USB-RS485."""
+    """Modbus RTU controller for Thessla Green AirPack via USB-RS485.
+
+    Mapowanie rejestrow zgodne z dokumentacja AirPack4 (08.2022.01).
+    """
 
     def __init__(
         self,
@@ -59,36 +62,40 @@ class ThesslaGreenModbusController:
         self._last_update_timestamp: float = 0
         self._last_update_interval: float = 0
 
-        # Bloki rejestrow holding (start, count) - rozszerzone w v0.4.0
-        # Modbus pozwala na max 16 rejestrow w jednym odczycie.
+        # Bloki rejestrow holding (start, count) - max 16 rejestrow w jednym odczycie.
+        # Komentarze wskazuja zawartosc bloku.
         self._holding_blocks = [
             (256, 2),         # supplyAirFlow, exhaustAirFlow
             (1280, 2),        # dac_supply, dac_exhaust (PWM wentylatorow)
             (4192, 2),        # antifreezMode, ...
             (4198, 1),        # antifreezStage
-            (4208, 7),        # mode, seasonMode, airFlowRateManual, airFlowRateTemporary,
-                              # supplyAirTemperatureManual, supplyAirTemperatureTemporary, +1
+            (4208, 7),        # mode, seasonMode, airFlowRateManual, airFlowRateTemporary, ...
             (4224, 1),        # specialMode
-            (4263, 1),        # gwcMode (status GWC)
-            (4304, 2),        # comfortModePanel, comfortMode (EKO/KOMFORT)
+            (4263, 1),        # gwcMode
+            (4304, 2),        # comfortModePanel, comfortMode
             (4320, 1),        # bypassOff
-            (4330, 1),        # bypassMode (status bypass)
-            (4384, 1),        # stopAhuCode (kod alarmu zatrzymujacego)
+            (4330, 1),        # bypassMode
+            (4384, 1),        # stopAhuCode
             (4387, 1),        # onOffPanelMode
-            (4711, 1),        # ERV mode (jesli dostepny)
+            (4482, 2),        # cfgSZF_FN_new, cfgSZF_FW_new (zuzycie filtrow %) - NOWE v0.4.1
+            (4660, 1),        # filter_supply_date_limit_get (data wymiany filtra naw) - NOWE v0.4.1
+            (4662, 1),        # filter_exhaust_date_limit_get (data wymiany filtra wyw) - NOWE v0.4.1
+            (4704, 1),        # postHeater_on (status nagrzewnicy wtornej ERV) - NOWE v0.4.1
+            (4711, 1),        # cfgPostHeaterMode (tryb ERV)
             (8192, 2),        # alarm, error
             (8208, 1),        # S16
             (8222, 2),        # S30, S31
-            (8330, 2),        # E138, E139
+            (8300, 1),        # E108 (czujnik TW) - NOWE v0.4.1
+            (8330, 14),       # E138-F151 (CF, filtry, przeplyw, alarmy filtrow) - NOWE v0.4.1
+            (8344, 1),        # E152
+            (8348, 2),        # E156, E157 (czas uzytkowania filtrow) - NOWE v0.4.1
             (8444, 1),        # E252
         ]
 
         # Input registers
         self._input_blocks = [
-            (16, 7),          # outside_temperature, supply_temperature, exhaust_temperature,
-                              # fpx_temperature, duct_supply_temperature, gwc_temperature,
-                              # ambient_temperature
-            (22, 1),          # ambient_temperature (TO) - juz w bloku wyzej, ale zachowane dla kompatybilnosci
+            (16, 7),          # outside_temperature, supply, exhaust, fpx, duct_supply, gwc, ambient
+            (22, 1),          # ambient_temperature - duplikat ostatniego z bloku (16,7), zachowany dla kompat.
         ]
 
         # Coil registers
