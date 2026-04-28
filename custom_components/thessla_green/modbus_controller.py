@@ -59,12 +59,39 @@ class ThesslaGreenModbusController:
         self._last_update_timestamp: float = 0
         self._last_update_interval: float = 0
 
+        # Bloki rejestrow holding (start, count) - rozszerzone w v0.4.0
+        # Modbus pozwala na max 16 rejestrow w jednym odczycie.
         self._holding_blocks = [
-            (256, 2), (4192, 2), (4198, 1), (4208, 3), (4210, 1),
-            (4224, 1), (4320, 1), (4387, 1),
-            (8192, 2), (8208, 1), (8222, 2), (8330, 2), (8444, 1)
+            (256, 2),         # supplyAirFlow, exhaustAirFlow
+            (1280, 2),        # dac_supply, dac_exhaust (PWM wentylatorow)
+            (4192, 2),        # antifreezMode, ...
+            (4198, 1),        # antifreezStage
+            (4208, 7),        # mode, seasonMode, airFlowRateManual, airFlowRateTemporary,
+                              # supplyAirTemperatureManual, supplyAirTemperatureTemporary, +1
+            (4224, 1),        # specialMode
+            (4263, 1),        # gwcMode (status GWC)
+            (4304, 2),        # comfortModePanel, comfortMode (EKO/KOMFORT)
+            (4320, 1),        # bypassOff
+            (4330, 1),        # bypassMode (status bypass)
+            (4384, 1),        # stopAhuCode (kod alarmu zatrzymujacego)
+            (4387, 1),        # onOffPanelMode
+            (4711, 1),        # ERV mode (jesli dostepny)
+            (8192, 2),        # alarm, error
+            (8208, 1),        # S16
+            (8222, 2),        # S30, S31
+            (8330, 2),        # E138, E139
+            (8444, 1),        # E252
         ]
-        self._input_blocks = [(16, 4), (22, 1)]
+
+        # Input registers
+        self._input_blocks = [
+            (16, 7),          # outside_temperature, supply_temperature, exhaust_temperature,
+                              # fpx_temperature, duct_supply_temperature, gwc_temperature,
+                              # ambient_temperature
+            (22, 1),          # ambient_temperature (TO) - juz w bloku wyzej, ale zachowane dla kompatybilnosci
+        ]
+
+        # Coil registers
         self._coil_blocks = [(9, 3)]
 
     async def stop(self):

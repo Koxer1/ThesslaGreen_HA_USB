@@ -13,20 +13,60 @@ from .coordinator import ThesslaGreenCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Mapowania dla sensorow z wartosciami enum (wg dokumentacji Thessla)
+GWC_STATUS_MAP = {
+    0: "GWC nieaktywny",
+    1: "Tryb zima",
+    2: "Tryb lato",
+}
+
+KOMFORT_STATUS_MAP = {
+    0: "KOMFORT nieaktywny",
+    1: "Funkcja grzania",
+    2: "Funkcja chlodzenia",
+}
+
+BYPASS_STATUS_MAP = {
+    0: "Bypass nieaktywny",
+    1: "Funkcja grzania (freeheating)",
+    2: "Funkcja chlodzenia (freecooling)",
+}
+
+# Sensory standardowe (numeryczne).
+# Adres 22 (Temperatura otoczenia / TO) celowo nie ma duplikatu - usunieto stary
+# "Rekuperator Temperatura PCB" (byl mylnie nazwany - rejestr 22 to TO wg dokumentacji,
+# nie temperatura PCB).
 SENSORS = [
-    # Temperatura
+    # Temperatury (input registers, scale 0.1)
     {"name": "Rekuperator Temperatura Czerpnia", "address": 16, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
     {"name": "Rekuperator Temperatura Nawiew", "address": 17, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
     {"name": "Rekuperator Temperatura Wywiew", "address": 18, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
     {"name": "Rekuperator Temperatura za FPX", "address": 19, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
-    {"name": "Rekuperator Temperatura PCB", "address": 22, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:cpu-64-bit"},
-    # Przepływy
-    {"name": "Rekuperator Strumień nawiew", "address": 256, "input_type": "holding", "scale": 1, "precision": 1, "unit": "m3/h", "icon": "mdi:fan"},
-    {"name": "Rekuperator Strumień wywiew", "address": 257, "input_type": "holding", "scale": 1, "precision": 1, "unit": "m3/h", "icon": "mdi:fan"},
-    # Statusy i flagi
+    {"name": "Rekuperator Temperatura kanal nawiew", "address": 20, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:thermometer"},
+    {"name": "Rekuperator Temperatura PCB", "address": 22, "input_type": "input", "scale": 0.1, "precision": 1, "unit": UnitOfTemperature.CELSIUS, "icon": "mdi:home-thermometer"},
+
+    # Przeplywy (holding registers)
+    {"name": "Rekuperator Strumien nawiew", "address": 256, "input_type": "holding", "scale": 1, "precision": 1, "unit": "m3/h", "icon": "mdi:fan"},
+    {"name": "Rekuperator Strumien wywiew", "address": 257, "input_type": "holding", "scale": 1, "precision": 1, "unit": "m3/h", "icon": "mdi:fan"},
+
+    # PWM wentylatorow (holding, scale 0.00244 V/jednostka)
+    {"name": "Rekuperator PWM nawiew", "address": 1280, "input_type": "holding", "scale": 0.00244, "precision": 2, "unit": "V", "icon": "mdi:sine-wave"},
+    {"name": "Rekuperator PWM wywiew", "address": 1281, "input_type": "holding", "scale": 0.00244, "precision": 2, "unit": "V", "icon": "mdi:sine-wave"},
+
+    # Statusy i flagi (holding registers)
     {"name": "Rekuperator tryb pracy", "address": 4208, "input_type": "holding", "icon": "mdi:cog"},
     {"name": "Rekuperator speedmanual", "address": 4210, "input_type": "holding", "unit": "%", "icon": "mdi:speedometer"},
+    {"name": "Rekuperator Predkosc chwilowy", "address": 4211, "input_type": "holding", "unit": "%", "icon": "mdi:speedometer-medium"},
+    {"name": "Rekuperator Kod alarmu", "address": 4384, "input_type": "holding", "icon": "mdi:alert-circle"},
 ]
+
+# Sensory z mapowaniem wartosci na opisowy tekst
+ENUM_SENSORS = [
+    {"name": "Rekuperator GWC status", "address": 4263, "value_map": GWC_STATUS_MAP, "icon": "mdi:earth"},
+    {"name": "Rekuperator KOMFORT status", "address": 4305, "value_map": KOMFORT_STATUS_MAP, "icon": "mdi:thermostat"},
+    {"name": "Rekuperator Bypass status", "address": 4330, "value_map": BYPASS_STATUS_MAP, "icon": "mdi:debug-step-over"},
+]
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -42,13 +82,18 @@ async def async_setup_entry(
         for sensor in SENSORS
     ]
 
-    # Dodaj sensor diagnostyczny
+    entities.extend([
+        ModbusEnumSensor(coordinator=coordinator, slave=slave, **sensor)
+        for sensor in ENUM_SENSORS
+    ])
+
+    # Sensor diagnostyczny
     entities.append(ModbusUpdateIntervalSensor(coordinator=coordinator, slave=slave))
 
     # Metryki obliczane
-    power_entity = entry.options.get("sensor_power")  # W lub kW
+    power_entity = entry.options.get("sensor_power")
     if not power_entity:
-        _LOGGER.warning("Nie skonfigurowano 'sensor_power' w opcjach integracji – COP będzie 'unavailable'.")
+        _LOGGER.warning("Nie skonfigurowano 'sensor_power' w opcjach integracji - COP bedzie 'unavailable'.")
 
     entities.extend([
         RekuEfficiencySensor(coordinator=coordinator, slave=slave),
@@ -57,6 +102,7 @@ async def async_setup_entry(
     ])
 
     async_add_entities(entities)
+
 
 class ModbusGenericSensor(SensorEntity):
     """Representation of a standard Modbus sensor."""
@@ -73,6 +119,7 @@ class ModbusGenericSensor(SensorEntity):
         self._attr_native_unit_of_measurement = unit
         self._attr_native_value = None
         self._attr_icon = icon
+        # Bez suffixu - zachowuje kompatybilnosc ze starymi encjami
         self._attr_unique_id = f"thessla_sensor_{slave}_{address}"
 
         self._attr_device_info = {
@@ -96,6 +143,10 @@ class ModbusGenericSensor(SensorEntity):
         if raw_value is None:
             return None
 
+        # Wartosc 0x8000 = brak odczytu temperatury (wg dokumentacji Thessla)
+        if raw_value == 0x8000:
+            return None
+
         # Konwersja na signed int16
         raw = raw_value
         if raw > 0x7FFF:
@@ -105,11 +156,48 @@ class ModbusGenericSensor(SensorEntity):
         return round(value, self._precision)
 
     async def async_update(self):
-        # Brak potrzeby ręcznego update — coordinator steruje
         pass
 
     async def async_added_to_hass(self):
         self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
+
+
+class ModbusEnumSensor(SensorEntity):
+    """Sensor mapujacy wartosc rejestru na opisowy tekst (np. status GWC, bypass)."""
+
+    def __init__(self, coordinator: ThesslaGreenCoordinator, name, address, value_map, icon=None, slave=1):
+        self.coordinator = coordinator
+        self._address = address
+        self._value_map = value_map
+        self._slave = slave
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_unique_id = f"thessla_enum_{slave}_{address}"
+
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{slave}")},
+            "name": "Rekuperator Thessla",
+            "manufacturer": "Thessla Green",
+            "model": "Modbus Rekuperator",
+        }
+
+    @property
+    def available(self):
+        return self.coordinator.last_update_success
+
+    @property
+    def native_value(self):
+        raw = self.coordinator.safe_data.holding.get(self._address)
+        if raw is None:
+            return None
+        return self._value_map.get(raw, f"Nieznany ({raw})")
+
+    async def async_update(self):
+        pass
+
+    async def async_added_to_hass(self):
+        self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
+
 
 class ModbusUpdateIntervalSensor(SensorEntity):
     """Diagnostic sensor showing time between full Modbus updates."""
@@ -139,18 +227,18 @@ class ModbusUpdateIntervalSensor(SensorEntity):
         return self.coordinator.safe_data.update_interval
 
     async def async_update(self):
-        # Niepotrzebne — wszystko przez coordinator
         pass
 
     async def async_added_to_hass(self):
         self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
 
+
 # =============================
-#  Metryki: sprawność / moc / COP
+#  Metryki: sprawnosc / moc / COP
 # =============================
 
 class _BaseComputedSensor(SensorEntity):
-    """Baza dla sensorów liczonych z koordynatora."""
+    """Baza dla sensorow liczonych z koordynatora."""
     _attr_should_poll = False
 
     def __init__(self, coordinator: ThesslaGreenCoordinator, slave: int):
@@ -178,7 +266,6 @@ class _BaseComputedSensor(SensorEntity):
         self._recalc()
         self.async_write_ha_state()
 
-    # Helpers (adresy „na sztywno” wg Twoich definicji):
     def _read_temp_czerpnia(self) -> float | None:
         return self._read_input_scaled(addr=16, scale=0.1, precision=1)
 
@@ -193,7 +280,7 @@ class _BaseComputedSensor(SensorEntity):
 
     def _read_input_scaled(self, addr: int, scale: float, precision: int) -> float | None:
         raw = self.coordinator.safe_data.input.get(addr)
-        if raw is None:
+        if raw is None or raw == 0x8000:
             return None
         if raw > 0x7FFF:
             raw -= 0x10000
@@ -212,10 +299,10 @@ class _BaseComputedSensor(SensorEntity):
 
 
 class RekuEfficiencySensor(_BaseComputedSensor):
-    """Sprawność [%] = ((Tnawiew - Tczerpnia) / (Twywiew - Tczerpnia)) * 100"""
+    """Sprawnosc [%] = ((Tnawiew - Tczerpnia) / (Twywiew - Tczerpnia)) * 100"""
     def __init__(self, coordinator: ThesslaGreenCoordinator, slave: int):
         super().__init__(coordinator, slave)
-        self._attr_name = "Rekuperator Sprawność"
+        self._attr_name = "Rekuperator Sprawnosc"
         self._attr_unique_id = f"thessla_efficiency_{slave}"
         self._attr_icon = "mdi:percent"
         self._attr_native_unit_of_measurement = "%"
@@ -235,7 +322,7 @@ class RekuEfficiencySensor(_BaseComputedSensor):
 
 
 class RekuRecoveryPowerSensor(_BaseComputedSensor):
-    """Moc odzysku [kW] ≈ 0.000335 * V[m3/h] * ΔT[°C]"""
+    """Moc odzysku [kW]"""
     def __init__(self, coordinator: ThesslaGreenCoordinator, slave: int):
         super().__init__(coordinator, slave)
         self._attr_name = "Rekuperator Moc Odzysku"
@@ -246,7 +333,7 @@ class RekuRecoveryPowerSensor(_BaseComputedSensor):
     def _recalc(self):
         To = self._read_temp_czerpnia()
         Ts = self._read_temp_nawiew()
-        flow = self._read_flow_nawiew()  # m3/h
+        flow = self._read_flow_nawiew()
         if None in (To, Ts) or flow is None or flow <= 0:
             self._attr_native_value = None
             return
@@ -255,7 +342,7 @@ class RekuRecoveryPowerSensor(_BaseComputedSensor):
 
 
 class RekuCOPSensor(_BaseComputedSensor):
-    """COP = (moc odzysku [kW]) / (pobór elektryczny [kW]) – bez jednostki"""
+    """COP = (moc odzysku [kW]) / (pobor elektryczny [kW])"""
 
     def __init__(self, coordinator: ThesslaGreenCoordinator, slave: int, power_entity: str | None):
         super().__init__(coordinator, slave)
@@ -277,7 +364,6 @@ class RekuCOPSensor(_BaseComputedSensor):
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
-        # nasłuch zmian sensora mocy - BEZPIECZNIE w event loop
         if self._power_entity:
             @callback
             def _on_power_change(event):
@@ -292,7 +378,6 @@ class RekuCOPSensor(_BaseComputedSensor):
             self.async_on_remove(unsub)
 
     def _read_power_kw(self) -> float | None:
-        """Czyta sensor mocy z HA, zwraca w kW (auto-konwersja W→kW)."""
         if not self._power_entity:
             return None
         st = self.hass.states.get(self._power_entity)
@@ -317,12 +402,11 @@ class RekuCOPSensor(_BaseComputedSensor):
             return val
         if "kwh" in u:
             _LOGGER.warning(
-                "Wybrany sensor '%s' podaje energię (%s), a nie moc. COP wymaga mocy chwilowej w W/kW.",
+                "Wybrany sensor '%s' podaje energie (%s), a nie moc. COP wymaga mocy chwilowej w W/kW.",
                 self._power_entity, unit
             )
             return None
-        # Brak/inna jednostka — traktuj jako kW (log diagnostyczny)
-        _LOGGER.debug("Sensor mocy '%s' ma jednostkę '%s' – przyjmuję jako kW.", self._power_entity, unit)
+        _LOGGER.debug("Sensor mocy '%s' ma jednostke '%s' - przyjmuje jako kW.", self._power_entity, unit)
         return val
 
     def _recalc(self):

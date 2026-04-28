@@ -11,11 +11,14 @@ from .coordinator import ThesslaGreenCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# UWAGA: usunieto "Rekuperator mode" (adres 4208) - zastapiony przez
+# select.rekuperator_tryb_pracy z opcjami Automatyczny/Manualny/Chwilowy.
+# Ten rejestr przyjmuje wartosci 0/1/2, wiec switch (bool) byl niewystarczajacy.
 SWITCHES = [
     {"name": "Rekuperator bypass", "address": 4320, "command_on": 0, "command_off": 1, "verify": True},
     {"name": "Rekuperator ON/OFF", "address": 4387, "command_on": 1, "command_off": 0, "verify": True},
-    {"name": "Rekuperator mode", "address": 4208, "command_on": 0, "command_off": 1, "verify": True},
 ]
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -33,6 +36,7 @@ async def async_setup_entry(
     ]
 
     async_add_entities(entities)
+
 
 class ModbusSwitch(SwitchEntity):
     """Representation of a Modbus-based switch."""
@@ -100,7 +104,6 @@ class ModbusSwitch(SwitchEntity):
 
     async def async_update(self) -> None:
         """Update state (no-op with coordinator)."""
-        # Nic nie robimy, dane aktualizuje coordinator
         pass
 
     async def async_added_to_hass(self) -> None:
