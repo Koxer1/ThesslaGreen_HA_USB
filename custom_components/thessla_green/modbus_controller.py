@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict
 
-from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.client import AsyncModbusSerialClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,19 +23,36 @@ class ControllerException(Exception):
 
 
 class ThesslaGreenModbusController:
+    """Modbus RTU controller for Thessla Green AirPack via USB-RS485."""
 
-    def __init__(self, host: str, port: int, slave_id: int, update_interval: int = 30):
-        self._host = host
-        self._port = port
+    def __init__(
+        self,
+        device: str,
+        baudrate: int,
+        parity: str,
+        stopbits: int,
+        bytesize: int,
+        slave_id: int,
+        update_interval: int = 30,
+    ):
+        self._device = device
+        self._baudrate = baudrate
+        self._parity = parity
+        self._stopbits = stopbits
+        self._bytesize = bytesize
         self._slave = slave_id
         self._update_interval = update_interval
 
-        self._client = AsyncModbusTcpClient(
-            host=self._host,
-            port=self._port,
+        self._client = AsyncModbusSerialClient(
+            port=self._device,
+            baudrate=self._baudrate,
+            parity=self._parity,
+            stopbits=self._stopbits,
+            bytesize=self._bytesize,
+            timeout=3,
             reconnect_delay=1,
             reconnect_delay_max=300,
-            retries=10,
+            retries=3,
         )
         self._controller_lock = asyncio.Lock()
 
@@ -52,7 +69,7 @@ class ThesslaGreenModbusController:
 
     async def stop(self):
         async with self._controller_lock:
-            _LOGGER.info("Stopping Modbus controller for %s:%d", self._host, self._port)
+            _LOGGER.info("Stopping Modbus RTU controller for %s", self._device)
             self._client.close()
 
     async def fetch_data(self) -> ControllerData:
@@ -74,41 +91,65 @@ class ThesslaGreenModbusController:
             # Read holding registers
             for start, count in self._holding_blocks:
                 try:
-                    result = await self._client.read_holding_registers(address=start, count=count,
-                                                                       device_id=self._slave)
+                    result = await self._client.read_holding_registers(
+                        address=start, count=count, device_id=self._slave
+                    )
                     if result.isError():
-                        raise ControllerException(f"Error reading holding registers {start}-{start + count - 1}")
+                        raise ControllerException(
+                            f"Error reading holding registers {start}-{start + count - 1}"
+                        )
                     for i, val in enumerate(result.registers):
                         data_holding[start + i] = val
-                    _LOGGER.debug("Holding registers %d-%d read: %s", start, start + count - 1, result.registers)
+                    _LOGGER.debug(
+                        "Holding registers %d-%d read: %s",
+                        start, start + count - 1, result.registers
+                    )
                 except Exception as e:
                     raise ControllerException(
-                        f"Exception reading holding registers {start}-{start + count - 1}: {e}") from e
+                        f"Exception reading holding registers {start}-{start + count - 1}: {e}"
+                    ) from e
 
             # Read input registers
             for start, count in self._input_blocks:
                 try:
-                    result = await self._client.read_input_registers(address=start, count=count, device_id=self._slave)
+                    result = await self._client.read_input_registers(
+                        address=start, count=count, device_id=self._slave
+                    )
                     if result.isError():
-                        raise ControllerException(f"Error reading input registers {start}-{start + count - 1}")
+                        raise ControllerException(
+                            f"Error reading input registers {start}-{start + count - 1}"
+                        )
                     for i, val in enumerate(result.registers):
                         data_input[start + i] = val
-                    _LOGGER.debug("Input registers %d-%d read: %s", start, start + count - 1, result.registers)
+                    _LOGGER.debug(
+                        "Input registers %d-%d read: %s",
+                        start, start + count - 1, result.registers
+                    )
                 except Exception as e:
                     raise ControllerException(
-                        f"Exception reading input registers {start}-{start + count - 1}: {e}") from e
+                        f"Exception reading input registers {start}-{start + count - 1}: {e}"
+                    ) from e
 
             # Read coils
             for start, count in self._coil_blocks:
                 try:
-                    result = await self._client.read_coils(address=start, count=count, device_id=self._slave)
+                    result = await self._client.read_coils(
+                        address=start, count=count, device_id=self._slave
+                    )
                     if result.isError():
-                        raise ControllerException(f"Error reading coils {start}-{start + count - 1}")
+                        raise ControllerException(
+                            f"Error reading coils {start}-{start + count - 1}"
+                        )
                     for i, val in enumerate(result.bits):
                         data_coil[start + i] = bool(val)
-                    _LOGGER.debug("Coils %d-%d read: %s", start, start + count - 1, result.bits)
+                    _LOGGER.debug(
+                        "Coils %d-%d read: %s",
+                        start, start + count - 1, result.bits
+                    )
                 except Exception as e:
-                    raise ControllerException(f"Exception reading coils {start}-{start + count - 1}: {e}") from e
+                    raise ControllerException(
+                        f"Exception reading coils {start}-{start + count - 1}: {e}"
+                    ) from e
 
             return ControllerData(
                 holding=data_holding,
@@ -123,24 +164,35 @@ class ThesslaGreenModbusController:
 
             try:
                 _LOGGER.debug("Writing register %d = %s (slave=%d)", address, value, self._slave)
-                result = await self._client.write_register(address=address, value=value, device_id=self._slave)
+                result = await self._client.write_register(
+                    address=address, value=value, device_id=self._slave
+                )
                 if result.isError():
-                    raise ControllerException(f"Failed to write register {address} with value {value}")
+                    raise ControllerException(
+                        f"Failed to write register {address} with value {value}"
+                    )
                 _LOGGER.info("Successfully wrote register %d = %s", address, value)
                 return True
             except Exception as e:
-                raise ControllerException(f"Exception writing register {address} = {value}: {e}") from e
+                raise ControllerException(
+                    f"Exception writing register {address} = {value}: {e}"
+                ) from e
 
     async def _ensure_connected(self):
         if self._client.connected:
             return
 
-        _LOGGER.info("Attempting connection to Modbus server %s:%d", self._host, self._port)
+        _LOGGER.info(
+            "Attempting connection to Modbus RTU device %s @ %d %d%s%d",
+            self._device, self._baudrate, self._bytesize, self._parity, self._stopbits
+        )
         try:
             if await self._client.connect():
-                _LOGGER.info("Successfully connected to Modbus server %s:%d", self._host, self._port)
+                _LOGGER.info("Successfully connected to Modbus RTU device %s", self._device)
                 return
         except Exception as e:
-            raise ControllerException(f"Exception during Modbus connection to {self._host}:{self._port}: {e}") from e
+            raise ControllerException(
+                f"Exception during Modbus RTU connection to {self._device}: {e}"
+            ) from e
 
-        raise ControllerException(f"Failed to connect to Modbus server {self._host}:{self._port}")
+        raise ControllerException(f"Failed to connect to Modbus RTU device {self._device}")
